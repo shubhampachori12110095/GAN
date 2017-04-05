@@ -7,7 +7,7 @@ from keras.utils import visualize_util
 from keras.layers.advanced_activations import LeakyReLU
 from keras.activations import linear
 from keras.layers.normalization import BatchNormalization
-from keras.layers.core import Flatten, Dense, Activation, Reshape, Lambda
+from keras.layers.core import Flatten, Dense, Activation, Reshape, Lambda, Dropout
 from keras.layers.convolutional import Convolution2D, Deconvolution2D, UpSampling2D, MaxPooling2D
 from keras.layers.pooling import AveragePooling2D, GlobalAveragePooling2D
 from keras.layers.noise import GaussianNoise
@@ -148,66 +148,6 @@ def generator_upsampling_mnistM(noise_dim, img_source_dim,img_dest_dim, bn_mode,
     return generator_model
 
 
-
-def generator_upsampling(noise_dim, img_dim, bn_mode, model_name="generator_upsampling", dset="mnist"):
-    """DCGAN generator based on Upsampling and Conv2D
-
-    Args:
-        noise_dim: Dimension of the noise input
-        img_dim: dimension of the image output
-        bn_mode: keras batchnorm mode
-        model_name: model name (default: {"generator_upsampling"})
-        dset: dataset (default: {"mnist"})
-
-    Returns:
-        keras model
-    """
-
-    s = img_dim[1]
-    f = 512
-
-    if dset == "mnist":
-        start_dim = int(s / 4)
-        nb_upconv = 2
-    else:
-        start_dim = int(s / 16)
-        nb_upconv = 4
-
-    if K.image_dim_ordering() == "th":
-        bn_axis = 1
-        reshape_shape = (f, start_dim, start_dim)
-        output_channels = img_dim[0]
-    else:
-        reshape_shape = (start_dim, start_dim, f)
-        bn_axis = -1
-        output_channels = img_dim[-1]
-
-    gen_noise_input = Input(shape=noise_dim, name="generator_input")
-
-    # Noise input and reshaping
-    x = Dense(f * start_dim * start_dim, input_dim=noise_dim)(gen_noise_input)
-    x = Reshape(reshape_shape)(x)
-    x = BatchNormalization(mode=bn_mode, axis=bn_axis)(x)
-    x = Activation("relu")(x)
-
-    # Upscaling blocks: Upsampling2D->Conv2D->ReLU->BN->Conv2D->ReLU
-    for i in range(nb_upconv):
-        x = UpSampling2D(size=(2, 2))(x)
-        nb_filters = int(f / (2 ** (i + 1)))
-        x = Convolution2D(nb_filters, 3, 3, border_mode="same", init=conv2D_init)(x)
-        x = BatchNormalization(mode=bn_mode, axis=1)(x)
-        x = Activation("relu")(x)
-        x = Convolution2D(nb_filters, 3, 3, border_mode="same", init=conv2D_init)(x)
-        x = Activation("relu")(x)
-
-    # Last Conv to get the output image
-    x = Convolution2D(output_channels, 3, 3, name="gen_conv2d_final",
-                      border_mode="same", activation='tanh', init=conv2D_init)(x)
-
-    generator_model = Model(input=[gen_noise_input], output=[x], name=model_name)
-    visualize_model(generator_model)
-    return generator_model
-
 #def mdb_layer():
 #    if use_mbd:
 #        x = Flatten()(x)
@@ -235,7 +175,7 @@ def generator_upsampling(noise_dim, img_dim, bn_mode, model_name="generator_upsa
 #       x = merge([x, x_mbd], mode='concat')
 #        x = Dense(1, name="disc_dense_1")(x)
 
-def discriminator(img_dim, bn_mode,model,wd,monsterClass,n_classes, model_name="discriminator",use_mbd=False):
+def discriminator(img_dim, bn_mode,model,wd,monsterClass,inject_noise,n_classes, model_name="discriminator",use_mbd=False):
     """DCGAN discriminator
 
     Args:
@@ -266,20 +206,29 @@ def discriminator(img_dim, bn_mode,model,wd,monsterClass,n_classes, model_name="
                       border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(disc_input)
     x = BatchNormalization(mode=bn_mode, axis=bn_axis)(x)
     x = LeakyReLU(0.2)(x)
-
+    x = Dropout(0.3)(x)
     # Conv blocks: Conv2D(2x2 strides)->BN->LReLU
     for i, f in enumerate(list_f[1:]):
         name = "disc_conv2d_%s" % (i + 2)
+        if inject_noise:
+            x = GaussianNoise( sigma=0.02 )(x)
         x = Convolution2D(f, 3, 3, subsample=(2, 2), name=name, border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(x)
         x = BatchNormalization(mode=bn_mode, axis=bn_axis)(x)
         x = LeakyReLU(0.2)(x)
+        x = Dropout(0.3)(x)
+
     #auxiliar classifier features
     #feats = GlobalAveragePooling2D()(x)
     #feats = Convolution2D(n_classes, 3, 3, name="last_conv", border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(x)
     #feats = GlobalAveragePooling2D()(feats)
   
     # Last convolution
-    x = Convolution2D(1, 3, 3, name="aux_conv", border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(x)
+    if inject_noise:
+        x = GaussianNoise( sigma=0.02 )(x)
+    aux_feats = Convolution2D(n_classes*2, 3, 3, name="aux_conv", border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(x)
+    aux_feats = GlobalAveragePooling2D()(aux_feats)
+    aux_feats = Activation('sigmoid')(aux_feats)
+    x = Convolution2D(1, 3, 3, name="final_conv", border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(x)
     # Average pooling, it serves as traditional GAN single number true/fake
     x = GlobalAveragePooling2D()(x)
 

@@ -109,7 +109,7 @@ def train(**kwargs):
     else:
         generator_model = models.generator_deconv(noise_dim, img_dest_dim, bn_mode, batch_size, dset=dset)
    
-    discriminator_model = models.discriminator(img_dest_dim, bn_mode,model,wd,monsterClass,n_classes)
+    discriminator_model = models.discriminator(img_dest_dim, bn_mode,model,wd,monsterClass,inject_noise,n_classes)
     DCGAN_model = models.DCGAN(generator_model, discriminator_model, noise_dim, img_source_dim, img_dest_dim,monsterClass)
 
     ############################
@@ -127,9 +127,9 @@ def train(**kwargs):
             discriminator_model.trainable = True
             discriminator_model.compile(loss=['categorical_crossentropy'], optimizer=opt_D)
         else:
-            DCGAN_model.compile(loss=['mse','categorical_crossentropy'], loss_weights=[1.0, 0.1], optimizer=opt_G)
+            DCGAN_model.compile(loss=['mse','categorical_crossentropy'], loss_weights=[1.0, 1.0], optimizer=opt_G)
             discriminator_model.trainable = True
-            discriminator_model.compile(loss=['mse','categorical_crossentropy'], loss_weights=[1.0, 0.1], optimizer=opt_D)
+            discriminator_model.compile(loss=['mse','categorical_crossentropy'], loss_weights=[1.0, 1.0], optimizer=opt_D)
 
     if resume: ########loading previous saved model weights
         data_utils.load_model_weights(generator_model, discriminator_model, DCGAN_model, name)
