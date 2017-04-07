@@ -227,11 +227,12 @@ def discriminator(img_dim, bn_mode,model,wd,monsterClass,inject_noise,n_classes,
         x = GaussianNoise( sigma=0.02 )(x)
     aux_feats = Convolution2D(n_classes*2, 3, 3, name="aux_conv", border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(x)
     aux_feats = GlobalAveragePooling2D()(aux_feats)
-    aux_feats = Activation('sigmoid')(aux_feats)
+    aux_feats = LeakyReLU(0.2)(aux_feats)
+    #aux_feats = Activation('sigmoid')(aux_feats)
     x = Convolution2D(1, 3, 3, name="final_conv", border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(x)
     # Average pooling, it serves as traditional GAN single number true/fake
     x = GlobalAveragePooling2D()(x)
-
+    x = LeakyReLU(0.2)(x)
     if monsterClass: #2*nClasses (nClasses True, nClasses False) and no true/fake output
         aux = Dense(n_classes*2, activation='softmax', name='auxiliary')(aux_feats)
         discriminator_model = Model(input=[disc_input], output=aux, name=model_name)
@@ -242,7 +243,7 @@ def discriminator(img_dim, bn_mode,model,wd,monsterClass,inject_noise,n_classes,
         discriminator_model = Model(input=[disc_input], output=[x,aux], name=model_name)
 
     visualize_model(discriminator_model)
-
+	
     return discriminator_model
 
 

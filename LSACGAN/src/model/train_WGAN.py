@@ -149,15 +149,14 @@ def train(**kwargs):
 
         while batch_counter < n_batch_per_epoch:
             if no_supertrain is None:
-                if gen_iterations < 25:
+                if (gen_iterations < 25) and (resume is False):
                     disc_iterations = 100
                 if gen_iterations % 500 == 0:
                     disc_iterations = 100
-
                 else:
                     disc_iterations = kwargs["disc_iterations"]
             else:
-                if gen_iterations < 25:
+                if (gen_iterations <25) and (resume is False):
                     disc_iterations = 100
                 else:
                     disc_iterations = kwargs["disc_iterations"]
@@ -217,8 +216,9 @@ def train(**kwargs):
             if model == 'wgan':
                 gen_loss = DCGAN_model.train_on_batch([X_gen,source_images], -np.ones(X_gen.shape[0]))
             if model == 'lsgan':
-                if monsterClass: #generator is trained as labels_real in order to improve
-                    labels_gen= np.concatenate((Y_dest_batch,np.zeros((X_disc_real.shape[0],n_classes))),axis=1)
+                if monsterClass: #generator is trained as labels_real in order to improve####################################THERE WAS A BUG: IN THE NEXT LINE I WAS USING Y_DEST_BATCH,
+															    # BUT I THINK I SHOULD USE Y_SOURCE_BATCH
+                    labels_gen= np.concatenate((Y_source_batch,np.zeros((X_disc_real.shape[0],n_classes))),axis=1)
                     gen_loss = DCGAN_model.train_on_batch([X_gen,source_images], labels_gen)
                 else:
                     gen_loss = DCGAN_model.train_on_batch([X_gen,source_images], [np.ones(X_gen.shape[0]),Y_source_batch])
