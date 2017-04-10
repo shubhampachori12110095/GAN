@@ -12,6 +12,7 @@ from keras.layers.convolutional import Convolution2D, Deconvolution2D, UpSamplin
 from keras.layers.pooling import AveragePooling2D, GlobalAveragePooling2D
 from keras.layers.noise import GaussianNoise
 from keras.regularizers import *
+import resnet50
 
 def conv2D_init(shape, name=None,dim_ordering=None):
     return initializations.normal(shape, scale=0.02, name=name)
@@ -84,12 +85,14 @@ def generator_upsampling_mnistM(noise_dim, img_source_dim,img_dest_dim, bn_mode,
         g = GaussianNoise( sigma=0.02 )(g)
     g_64feats = Convolution2D(nb_filters, 3, 3, border_mode='same', init=conv2D_init,W_regularizer=l2(wd))(g) #convolved by 3x3 filter to get 64x55x35
     g_64feats = Activation('relu')(g_64feats)
+
     if inject_noise:
         g_64feats = GaussianNoise( sigma=0.02 )(g_64feats)
 
     H0 = Convolution2D(nb_filters, 3, 3, border_mode='same', init=conv2D_init,W_regularizer=l2(wd))(g_64feats)
     H0 = BatchNormalization(mode=bn_mode,axis=1)(H0)  
     H0 = Activation('relu')(H0)
+
     if inject_noise:
         H0 = GaussianNoise( sigma=0.02 )(H0)
     H0 = Convolution2D(nb_filters, 3, 3, border_mode='same', init=conv2D_init,W_regularizer=l2(wd))(H0)
@@ -175,6 +178,77 @@ def generator_upsampling_mnistM(noise_dim, img_source_dim,img_dest_dim, bn_mode,
 #       x = merge([x, x_mbd], mode='concat')
 #        x = Dense(1, name="disc_dense_1")(x)
 
+def discriminatorResNet(img_dim, bn_mode,model,wd,monsterClass,inject_noise,n_classes, model_name="discriminator",use_mbd=False):
+    """DCGAN discriminator
+
+    Args:
+        img_dim: dimension of the image output
+        bn_mode: keras batchnorm mode
+        model_name: model name (default: {"generator_deconv"})
+
+    Returns:
+        keras model
+    """
+
+    if K.image_dim_ordering() == "th":
+        bn_axis = 1
+        min_s = min(img_dim[1:])
+    else:
+        bn_axis = -1
+        min_s = min(img_dim[:-1])
+
+    disc_input = Input(shape=img_dim, name="discriminator_input")
+
+    # Get the list of number of conv filters
+    # (first layer starts with 64), filters are subsequently doubled
+    nb_conv =int(np.floor(np.log(min_s // 4) / np.log(2)))
+    list_f = [64 * min(8, (2 ** i)) for i in range(nb_conv)]
+
+    # First conv with 2x2 strides
+    x = Convolution2D(list_f[0], 3, 3, subsample=(2, 2), name="disc_conv2d_1",
+                      border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(disc_input)
+    x = BatchNormalization(mode=bn_mode, axis=bn_axis)(x)
+    x = LeakyReLU(0.2)(x)
+    x = Dropout(0.3)(x)
+    # Conv blocks: Conv2D(2x2 strides)->BN->LReLU
+    for i, f in enumerate(list_f[1:]):
+        name = "disc_conv2d_%s" % (i + 2)
+        if inject_noise:
+            x = GaussianNoise( sigma=0.02 )(x)
+        x = Convolution2D(f, 3, 3, subsample=(2, 2), name=name, border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(x)
+        x = BatchNormalization(mode=bn_mode, axis=bn_axis)(x)
+        x = LeakyReLU(0.2)(x)
+        x = Dropout(0.3)(x)
+
+    #auxiliar classifier features
+    #feats = GlobalAveragePooling2D()(x)
+    #feats = Convolution2D(n_classes, 3, 3, name="last_conv", border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(x)
+    #feats = GlobalAveragePooling2D()(feats)
+  
+    # Last convolution
+    if inject_noise:
+        x = GaussianNoise( sigma=0.02 )(x)
+    aux_feats = Convolution2D(n_classes*2, 3, 3, name="aux_conv", border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(x)
+    aux_feats = GlobalAveragePooling2D()(aux_feats)
+    aux_feats = LeakyReLU(0.2)(aux_feats)
+    #aux_feats = Activation('sigmoid')(aux_feats)
+    x = Convolution2D(1, 3, 3, name="final_conv", border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(x)
+    # Average pooling, it serves as traditional GAN single number true/fake
+    x = GlobalAveragePooling2D()(x)
+    x = LeakyReLU(0.2)(x)
+    if monsterClass: #2*nClasses (nClasses True, nClasses False) and no true/fake output
+        aux = Dense(n_classes*2, activation='softmax', name='auxiliary')(aux_feats)
+        discriminator_model = Model(input=[disc_input], output=aux, name=model_name)
+    else:
+        #FC7 = Dense(128, name='FC7',W_regularizer=l2(wd))(feats)
+        #FC7 = LeakyReLU(0.2)(FC7)
+        ResNet = resnet50.ResNet50(disc_input,Shape=img_dim, weights='imagenet')
+        classificator = Dense(n_classes, activation='softmax', name='fc')(ResNet.output)
+        discriminator_model = Model(input=[disc_input], output=[x,classificator], name=model_name)
+
+    visualize_model(discriminator_model)
+    return discriminator_model
+
 def discriminator(img_dim, bn_mode,model,wd,monsterClass,inject_noise,n_classes, model_name="discriminator",use_mbd=False):
     """DCGAN discriminator
 
@@ -242,10 +316,92 @@ def discriminator(img_dim, bn_mode,model,wd,monsterClass,inject_noise,n_classes,
         aux = Dense(n_classes, activation='softmax', name='auxiliary')(x)
         discriminator_model = Model(input=[disc_input], output=[x,aux], name=model_name)
 
-    visualize_model(discriminator_model)
-	
+    visualize_model(discriminator_model)	
     return discriminator_model
 
+def discriminator_naive(img_dim, bn_mode,model,wd,monsterClass,inject_noise,n_classes, model_name="discriminator",use_mbd=False):
+    """DCGAN discriminator
+    Args:
+        img_dim: dimension of the image output
+        bn_mode: keras batchnorm mode
+        model_name: model name (default: {"generator_deconv"})
+    Returns:
+        keras model
+    """
+    if K.image_dim_ordering() == "th":
+        bn_axis = 1
+        min_s = min(img_dim[1:])
+    else:
+        bn_axis = -1
+        min_s = min(img_dim[:-1])
+
+    disc_input = Input(shape=img_dim, name="discriminator_input")
+
+    # Get the list of number of conv filters
+    # (first layer starts with 64), filters are subsequently doubled
+    nb_conv =int(np.floor(np.log(min_s // 4) / np.log(2)))
+    list_f = [64 * min(8, (2 ** i)) for i in range(nb_conv)]
+
+    # First conv with 2x2 strides
+    x = Convolution2D(list_f[0], 3, 3, subsample=(2, 2), name="disc_conv2d_1",
+                      border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(disc_input)
+    x = BatchNormalization(mode=bn_mode, axis=bn_axis)(x)
+    x = LeakyReLU(0.2)(x)
+    x = Dropout(0.3)(x)
+    # Conv blocks: Conv2D(2x2 strides)->BN->LReLU
+    for i, f in enumerate(list_f[1:]):
+        name = "disc_conv2d_%s" % (i + 2)
+        if inject_noise:
+            x = GaussianNoise( sigma=0.02 )(x)
+        x = Convolution2D(f, 3, 3, subsample=(2, 2), name=name, border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(x)
+        x = BatchNormalization(mode=bn_mode, axis=bn_axis)(x)
+        x = LeakyReLU(0.2)(x)
+        x = Dropout(0.3)(x)
+
+    # Last convolution
+    if inject_noise:
+        x = GaussianNoise( sigma=0.02 )(x)
+    x = Convolution2D(1, 3, 3, name="final_conv", border_mode="same", bias=False, init=conv2D_init,W_regularizer=l2(wd))(x)
+    # Average pooling, it serves as traditional GAN single number true/fake
+    x = GlobalAveragePooling2D()(x)
+#    x = LeakyReLU(0.2)(x) NO leakyReLU for simple LS GAN
+    discriminator_model = Model(input=[disc_input], output=[x], name=model_name)
+
+    visualize_model(discriminator_model)
+    return discriminator_model
+
+#Do I need to insert bn_mode? I have to test both bn mode 0 and 2 for resnet too
+def resnet(img_dim,n_classes, model_name="resnet"):
+
+    _input = Input(shape=img_dim, name="discriminator_input")
+    ResNet = resnet50.ResNet50(_input,Shape=img_dim, weights='imagenet')
+    out = Dense(n_classes, activation='softmax', name='fc')(ResNet.output)
+    resnet_model = Model(input=_input, output=out, name=model_name)
+    visualize_model(resnet_model)
+    return resnet_model
+
+def GenToClassifierModel(generator, classifier, noise_dim, img_source_dim):
+    """GEN + classifier model
+
+    Args:
+        generator: keras generator model
+        classifier: keras classifier model
+        noise_dim: generator input noise dimension
+        img_dim: real image data dimension
+
+    Returns:
+        keras model
+    """
+    noise_input = Input(shape=noise_dim, name="noise_input")
+    image_input = Input(shape=img_source_dim, name="image_input")
+
+    generated_image = generator([noise_input,image_input])
+    y_pred = classifier(generated_image)
+    GenToClassifierModel = Model(input=[noise_input,image_input],
+                  output=y_pred,
+                  name="GenToClassifierModel")
+    visualize_model(GenToClassifierModel)
+    return GenToClassifierModel
 
 def DCGAN(generator, discriminator, noise_dim, img_source_dim, img_dest_dim,monsterClass):
     """DCGAN generator + discriminator model
@@ -272,6 +428,31 @@ def DCGAN(generator, discriminator, noise_dim, img_source_dim, img_dest_dim,mons
         DCGAN_output,y_aux = discriminator(generated_image)
         DCGAN = Model(input=[noise_input,image_input],
                   output=[DCGAN_output,y_aux],
+                  name="DCGAN")
+    visualize_model(DCGAN)
+
+    return DCGAN
+
+
+def DCGAN_naive(generator, discriminator, noise_dim, img_source_dim):
+    """DCGAN generator + discriminator model
+
+    Args:
+        generator: keras generator model
+        discriminator: keras discriminator model
+        noise_dim: generator input noise dimension
+        img_dim: real image data dimension
+
+    Returns:
+        keras model
+    """
+    noise_input = Input(shape=noise_dim, name="noise_input")
+    image_input = Input(shape=img_source_dim, name="image_input")
+
+    generated_image = generator([noise_input,image_input])
+    DCGAN_output = discriminator(generated_image)
+    DCGAN = Model(input=[noise_input,image_input],
+                  output=DCGAN_output,
                   name="DCGAN")
     visualize_model(DCGAN)
 
