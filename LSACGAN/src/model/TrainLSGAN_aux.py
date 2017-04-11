@@ -7,20 +7,19 @@ from keras.utils import generic_utils
 sys.path.append("../utils")
 import general_utils
 import data_utils
+from data_utils import invNorm
 import matplotlib.pyplot as plt
 from IPython import display
 
-def plot_images(images,figsize=(15,15)):
-    dim=(6,10)
-    plt.figure(figsize=figsize)
-    for i in range(images.shape[0]):
-        plt.subplot(dim[0],dim[1],i+1)
-#        plt.imshow(images[i])
-        plt.axis('off')
-    plt.tight_layout()
-    plt.show() 
+def evaluating_GENned(noise_scale,noise_dim,X_source_test,Y_source_test,classifier,gen_model):
+    #converting source test set into source-GENned set(passing through the GEN)
+    n = data_utils.sample_noise(noise_scale, X_source_test.shape[0], noise_dim)
+    X_gen_test = gen_model.predict ([n,X_source_test], batch_size=1024, verbose=0)
+    loss4, acc4 = classifier.evaluate(X_gen_test, Y_source_test,batch_size=256, verbose=0)    
+    print('\n Classifier Accuracy on source-GENned domain:  %.0f%%' % (100 * acc4))
 
-def train(**kwargs):
+
+def trainClassAux(**kwargs):
     """
     Train standard DCGAN model
 
@@ -50,6 +49,7 @@ def train(**kwargs):
     inject_noise = kwargs["inject_noise"]
     model = kwargs["model"]
     no_supertrain = kwargs["no_supertrain"]
+    noClass = kwargs["noClass"]
     resume = kwargs["resume"]
     name = kwargs["name"]
     wd = kwargs["wd"]
@@ -100,6 +100,7 @@ def train(**kwargs):
     # Create optimizers
     opt_G = data_utils.get_optimizer(opt_G, lr_G)
     opt_D = data_utils.get_optimizer(opt_D, lr_D)
+    opt_C = data_utils.get_optimizer('SGD', 0.01)
 
     #######################
     # Load models
@@ -110,12 +111,10 @@ def train(**kwargs):
     else:
         generator_model = models.generator_deconv(noise_dim, img_dest_dim, bn_mode, batch_size, dset=dset)
 
-    if discriminator == "disc_resnet":
-        discriminator_model = models.discriminatorResNet(img_dest_dim, bn_mode,model,wd,monsterClass,inject_noise,n_classes)       
-    else:   
-        discriminator_model = models.discriminator(img_dest_dim, bn_mode,model,wd,monsterClass,inject_noise,n_classes)
-    DCGAN_model = models.DCGAN(generator_model, discriminator_model, noise_dim, img_source_dim, img_dest_dim,monsterClass)
-
+    discriminator_model = models.discriminator_naive(img_dest_dim, bn_mode,model,wd,monsterClass,inject_noise,n_classes)
+    DCGAN_model = models.DCGAN_naive(generator_model, discriminator_model, noise_dim, img_source_dim)
+    classifier = models.resnet(img_dest_dim,n_classes) #it is img_dest_dim because it is actually the generated image dim,that is equal to dest_dim
+    GenToClassifierModel = models.GenToClassifierModel(generator_model, classifier, noise_dim, img_source_dim)
     ############################
     # Compile models
     ############################
@@ -126,14 +125,13 @@ def train(**kwargs):
         discriminator_model.trainable = True
         discriminator_model.compile(loss=models.wasserstein, optimizer=opt_D)
     if model == 'lsgan':
-        if monsterClass:
-            DCGAN_model.compile(loss=['categorical_crossentropy'], optimizer=opt_G)
-            discriminator_model.trainable = True
-            discriminator_model.compile(loss=['categorical_crossentropy'], optimizer=opt_D)
-        else:
-            DCGAN_model.compile(loss=['mse','categorical_crossentropy'], loss_weights=[1.0, 1.0], optimizer=opt_G)
-            discriminator_model.trainable = True
-            discriminator_model.compile(loss=['mse','categorical_crossentropy'], loss_weights=[1.0, 1.0], optimizer=opt_D)
+        DCGAN_model.compile(loss='mse',  optimizer=opt_G)
+        discriminator_model.trainable = True
+        discriminator_model.compile(loss='mse', optimizer=opt_D)
+
+    classifier.trainable = True # I wanna freeze the classifier without any training updates
+    classifier.compile(loss='categorical_crossentropy', optimizer=opt_C,metrics=['accuracy']) # it is actually never using optimizer
+    GenToClassifierModel.compile(loss='categorical_crossentropy', optimizer=opt_G,metrics=['accuracy'])
 
     if resume: ########loading previous saved model weights
         data_utils.load_model_weights(generator_model, discriminator_model, DCGAN_model, name)
@@ -143,8 +141,29 @@ def train(**kwargs):
     #data_utils.plot_debug(X_dest_train,X_source_train, generator_model,noise_dim, image_dim_ordering,32,batch_size=32)
 
     #################
-    # Start training
+    # Start aux classifier training
     ################
+ 
+    print ("Testing accuracy on target domain before training:")
+    loss1,acc1 =classifier.evaluate(X_dest_test, Y_dest_test,batch_size=256, verbose=0)
+    print('\n Classifier Accuracy before training: %.0f%%' % (100 * acc1))
+    classifier.trainable = True
+    classifier.fit(X_dest_train, Y_dest_train, validation_split=0.1, batch_size=256, nb_epoch=100, verbose=1)
+    print ("\n Testing accuracy on target domain AFTER training:")
+    loss2,acc2 = classifier.evaluate(X_dest_test, Y_dest_test, verbose=0)
+    print('\n Classifier Accuracy after training:  %.0f%%' % (100 * acc2))
+    print ("Testing accuracy on source domain:")
+    loss3, acc3 = classifier.evaluate(X_source_test, Y_source_test,batch_size=256, verbose=0)    
+    print('\n Classifier Accuracy on source domain:  %.0f%%' % (100 * acc3))
+
+    evaluating_GENned(noise_scale,noise_dim,X_source_test,Y_source_test,classifier,generator_model)
+
+    classifier.trainable = False # I wanna freeze the classifier without any more training updates
+    classifier.compile(loss='categorical_crossentropy', optimizer=opt_C,metrics=['accuracy']) 
+    #################
+    # Start GAN training
+    ################
+
     for e in range(nb_epoch):
         # Initialize progbar and batch counter
         progbar = generic_utils.Progbar(epoch_size)
@@ -171,6 +190,7 @@ def train(**kwargs):
             list_disc_loss_real = []
             list_disc_loss_gen = []
             list_gen_loss = []
+            list_class_loss_real = []
             for disc_it in range(disc_iterations):
 
                 # Clip discriminator weights
@@ -196,17 +216,8 @@ def train(**kwargs):
                     disc_loss_real = discriminator_model.train_on_batch(X_disc_real, -np.ones(X_disc_real.shape[0]))
                     disc_loss_gen = discriminator_model.train_on_batch(X_disc_gen, np.ones(X_disc_gen.shape[0]))
                 if model == 'lsgan':
-                    if monsterClass: #for real domain I put [labels 0 0 0...0], for fake domain I put [0 0...0 labels]
-                        #import code
-                        #code.interact(local=locals()) #np.concatenate((Y_dest_batch,np.zeros((X_disc_real.shape[0],n_classes))),axis=1)
-                        labels_real= np.concatenate((Y_dest_batch,np.zeros((X_disc_real.shape[0],n_classes))),axis=1)
-                        labels_gen= np.concatenate((np.zeros((X_disc_real.shape[0],n_classes)),Y_source_batch),axis=1)
-                        disc_loss_real = discriminator_model.train_on_batch(X_disc_real, labels_real)
-                        disc_loss_gen = discriminator_model.train_on_batch(X_disc_gen, labels_gen)
-                    else:
-                        disc_loss_real = discriminator_model.train_on_batch(X_disc_real, [np.ones(X_disc_real.shape[0]),Y_dest_batch])
-                        Y_fake_batch =np.zeros([X_disc_gen.shape[0],n_classes])  
-                        disc_loss_gen = discriminator_model.train_on_batch(X_disc_gen, [np.zeros(X_disc_gen.shape[0]),Y_fake_batch])
+                    disc_loss_real = discriminator_model.train_on_batch(X_disc_real, np.ones(X_disc_real.shape[0]))
+                    disc_loss_gen = discriminator_model.train_on_batch(X_disc_gen, np.zeros(X_disc_gen.shape[0]))
                 list_disc_loss_real.append(disc_loss_real)
                 list_disc_loss_gen.append(disc_loss_gen)
 
@@ -214,20 +225,21 @@ def train(**kwargs):
             # 2) Train the generator
             #######################
             X_gen = data_utils.sample_noise(noise_scale, batch_size, noise_dim)
+            source_images = X_source_train[np.random.randint(0,X_source_train.shape[0],size=batch_size),:,:,:]
             X_source_batch2, Y_source_batch2,idx_source_batch2 = next(data_utils.gen_batch(X_source_train, Y_source_train, batch_size))
-            #source_images = X_source_train[np.random.randint(0,X_source_train.shape[0],size=batch_size),:,:,:]
             # Freeze the discriminator
             discriminator_model.trainable = False
             if model == 'wgan':
                 gen_loss = DCGAN_model.train_on_batch([X_gen,X_source_batch2], -np.ones(X_gen.shape[0]))
             if model == 'lsgan':
-                if monsterClass: #generator is trained as labels_real in order to improve####################################THERE WAS A BUG: IN THE NEXT LINE I WAS USING Y_DEST_BATCH,
-															    # BUT I THINK I SHOULD USE Y_SOURCE_BATCH
-                    labels_gen= np.concatenate((Y_source_batch2,np.zeros((X_disc_real.shape[0],n_classes))),axis=1)
-                    gen_loss = DCGAN_model.train_on_batch([X_gen,X_source_batch2], labels_gen) ##BUUUUG
-                else:
-                    gen_loss = DCGAN_model.train_on_batch([X_gen,X_source_batch2], [np.ones(X_gen.shape[0]),Y_source_batch2])
+                gen_loss = DCGAN_model.train_on_batch([X_gen,X_source_batch2], np.ones(X_gen.shape[0]))
             list_gen_loss.append(gen_loss)
+
+            if not noClass:
+                new_gen_loss = GenToClassifierModel.train_on_batch([X_gen,X_source_batch2], Y_source_batch2)
+                list_class_loss_real.append(new_gen_loss)
+            else:
+                list_class_loss_real.append(0.0)
             # Unfreeze the discriminator
             discriminator_model.trainable = True
 
@@ -237,7 +249,8 @@ def train(**kwargs):
             progbar.add(batch_size, values=[("Loss_D", 0.5*np.mean(list_disc_loss_real) + 0.5*np.mean(list_disc_loss_gen)),
                                             ("Loss_D_real", np.mean(list_disc_loss_real)),
                                             ("Loss_D_gen", np.mean(list_disc_loss_gen)),
-                                            ("Loss_G", np.mean(list_gen_loss))])
+                                            ("Loss_G", np.mean(list_gen_loss)),
+                                            ("Loss_classifier", np.mean(list_class_loss_real))])
 
             # plot images 1 times per epoch
             if batch_counter % (n_batch_per_epoch) == 0:
@@ -255,5 +268,6 @@ def train(**kwargs):
 
         # Save model weights (by default, every 5 epochs)
         data_utils.save_model_weights(generator_model, discriminator_model, DCGAN_model, e, name)
+        evaluating_GENned(noise_scale,noise_dim,X_source_test,Y_source_test,classifier,generator_model)
 
 
