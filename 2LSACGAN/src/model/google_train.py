@@ -19,7 +19,6 @@ from additional_models import *
 from weightnorm import *
 from collections import deque
 
-
 def train(**kwargs):
     """
     Train standard DCGAN model
@@ -119,12 +118,14 @@ def train(**kwargs):
    #     models.make_trainable(disc_penalty_model, True)
         discriminator_model.compile(loss=models.wasserstein, optimizer=opt_D)
     if model == 'lsgan':
-        DCGAN_model.compile(loss=['mse'], optimizer=opt_G)
-        DCGAN_model.compile(loss=['mse'], optimizer=opt_G)
-        models.make_trainable(discriminator_model, True)
-    #    models.make_trainable(disc_penalty_model, True)
-        discriminator_model.compile(loss=['mse'], optimizer=opt_D)
- 
+        if disc_type == "simple_disc":
+            DCGAN_model.compile(loss=['mse'], optimizer=opt_G)
+            models.make_trainable(discriminator_model, True)
+            discriminator_model.compile(loss=['mse'], optimizer=opt_D)
+        elif disc_type == "nclass_disc":
+            DCGAN_model.compile(loss=['mse','categorical_crossentropy'],loss_weights=[1.0, 0.1], optimizer=opt_G) 
+            models.make_trainable(discriminator_model, True)
+            discriminator_model.compile(loss=['mse','categorical_crossentropy'], loss_weights=[1.0, 0.1], optimizer=opt_D)
 #    GenToClassifier_model.compile(loss='categorical_crossentropy', optimizer=opt_GC)
     models.make_trainable(classificator_model, True)
     classificator_model.compile(loss='categorical_crossentropy',metrics=['accuracy'],optimizer=opt_C)
@@ -196,9 +197,13 @@ def train(**kwargs):
                     current_labels_real = -np.ones(X_disc_real.shape[0]) 
                     current_labels_gen = np.ones(X_disc_gen.shape[0]) 
                 elif model == 'lsgan': 
-                    current_labels_real = np.ones(X_disc_real.shape[0]) 
-                    current_labels_gen = np.zeros(X_disc_gen.shape[0]) 
-
+                    if disc_type == "simple_disc":
+                        current_labels_real = np.ones(X_disc_real.shape[0]) 
+                        current_labels_gen = np.zeros(X_disc_gen.shape[0]) 
+                    elif disc_type == "nclass_disc":
+                        virtual_real_labels =np.zeros([X_disc_gen.shape[0],n_classes])
+                        current_labels_real = [np.ones(X_disc_real.shape[0]),virtual_real_labels]
+                        current_labels_gen =[np.zeros(X_disc_gen.shape[0]), Y_source_batch ]
                 ##############
                 #Train the disc on gen-buffered samples and on current real samples
                 ##############
@@ -207,8 +212,14 @@ def train(**kwargs):
                 bufferImages, bufferLabels = img_buffer.get_from_buffer(batch_size)
                 disc_loss_gen = discriminator_model.train_on_batch(bufferImages, bufferLabels)
 
-                list_disc_loss_real.appendleft(disc_loss_real)
-                list_disc_loss_gen.appendleft(disc_loss_gen)
+                #if not isinstance(disc_loss_real, collections.Iterable): disc_loss_real = [disc_loss_real]
+                #if not isinstance(disc_loss_real, collections.Iterable): disc_loss_gen = [disc_loss_gen]
+                if disc_type == "simple_disc":
+                    list_disc_loss_real.appendleft(disc_loss_real)
+                    list_disc_loss_gen.appendleft(disc_loss_gen)
+                elif disc_type == "nclass_disc":
+                    list_disc_loss_real.appendleft(disc_loss_real[0])
+                    list_disc_loss_gen.appendleft(disc_loss_gen[0])
                 #############
                 ####Train the discriminator w.r.t gradient penalty
                 #############
@@ -228,7 +239,11 @@ def train(**kwargs):
             if model == 'wgan':
                 gen_loss = DCGAN_model.train_on_batch([X_gen,X_source_batch2], -np.ones(X_gen.shape[0]))
             if model == 'lsgan':
-                gen_loss =  DCGAN_model.train_on_batch([X_gen,X_source_batch2], np.ones(X_gen.shape[0])) #TRYING SAME BATCH OF DISC
+                if disc_type == "simple_disc":                
+                    gen_loss =  DCGAN_model.train_on_batch([X_gen,X_source_batch2], np.ones(X_gen.shape[0])) #TRYING SAME BATCH OF DISC
+                elif disc_type == "nclass_disc":
+                    gen_loss = DCGAN_model.train_on_batch([X_gen,X_source_batch2], [np.ones(X_gen.shape[0]),Y_source_batch2])
+                    gen_loss = gen_loss[0]
             list_gen_loss.appendleft(gen_loss)
 
 
@@ -258,6 +273,8 @@ def train(**kwargs):
             if gen_iterations % (n_batch_per_epoch*5) == 0:
                 if visualize:
                     BIG_ASS_VISUALIZATION_slerp(X_source_train[1], generator_model, noise_dim)
+        #    if (e % 20) == 0:
+        #        lr_decay([discriminator_model,DCGAN_model,classificator_model],decay_value=0.95)
 
         print ("Dest labels:") 
         print (Y_dest_test[idx_source_plot].argmax(1))
@@ -272,8 +289,6 @@ def train(**kwargs):
         loss4, acc4 = classificator_model.evaluate(Xtarget_dataset, Ytarget_dataset,batch_size=1024, verbose=0)                                                                                   
         print('\n Classifier Accuracy and loss on full target domain:  %.2f%% / %.5f%%' % ((100 * acc4), loss4))
         #decay learning rates by multiplying each model optimizer.lr by decay_value:
-        if e % 20 == 0:
-            lr_decay([discriminator_model,DCGAN_model,classificator_model],decay_value=0.95)
 
 #        loss2,acc2 = classifier.evaluate(X_dest_test, Y_dest_test,batch_size=512, verbose=0)                                                                                         
 #        print('\n Classifier Accuracy on target domain test set after training:  %.2f%%' % (100 * acc2))                                                                             
