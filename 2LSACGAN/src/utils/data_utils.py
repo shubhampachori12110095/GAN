@@ -16,6 +16,7 @@ import scipy.misc
 from scipy import ndimage
 from weightnorm import AdamWithWeightnorm, SGDWithWeightnorm
 from keras import backend as K
+import code
 
 def lr_decay(models,decay_value):
     for model in models:
@@ -444,6 +445,8 @@ def BIG_ASS_VISUALIZATION_slerp(X_image, generator_model,noise_dim):
             x = x[np.newaxis]
             X_gen = generator_model.predict([x,X_image[np.newaxis]])
             X_gen = inverse_normalization(X_gen)
+            if X_gen.shape[1] == 1:
+                X_gen=np.concatenate([X_gen,X_gen,X_gen],axis=1)
             X_gen=X_gen[0,:,:,:] 
             X_gen = X_gen.transpose(1,2,0)
             filename = '/home/paolo/Downloads/video/image_%d.png' % count    

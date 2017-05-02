@@ -198,7 +198,6 @@ def discriminator_custom(img_dim,wd):
     return discriminator_model
 
 def classificator_google_mnistM(img_dim,n_classes,wd):
-
     input = Input(shape=img_dim, name="classifier_input")
     x = Conv2D(32, (5, 5), strides=(1, 1), name="conv1",border_mode="same",weight_norm=False, kernel_initializer="he_normal",kernel_regularizer=l2(wd))(input) 
     x = Activation('relu')(x)
