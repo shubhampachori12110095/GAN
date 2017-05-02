@@ -232,7 +232,7 @@ def train(**kwargs):
             ################
             ###CLASSIFIER TRAINING OUTSIDE DISC LOOP(wanna train in just 1 time even if disc_iter > 1)
             #################
-            class_loss_gen = classificator_model.train_on_batch(X_dest_batch, Y_dest_batch) #NO LABEL SMOOTHING!!!!
+            class_loss_gen = classificator_model.train_on_batch(X_dest_batch, Y_dest_batch) #NO LABEL SMOOTHING!!!! inverted training w.r.t. to AtoB, because I have labels of A
             list_classifier_loss.appendleft(class_loss_gen[0])
             #######################
             # 2) Train the generator
