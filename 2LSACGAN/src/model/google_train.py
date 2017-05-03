@@ -66,10 +66,10 @@ def train(**kwargs):
 
     # Load and normalize data
     if dset == "mnistM":
-        X_source_train,Y_source_train, X_source_test, Y_source_test, n_classes1 = data_utils.load_image_dataset(img_dim, image_dim_ordering,dset='mnist')
+        X_source_train,Y_source_train, X_source_test, Y_source_test, n_classes1 = data_utils.load_image_dataset(img_dim, image_dim_ordering,dset='mnist',shuff=True)
 #        X_source_train=np.concatenate([X_source_train,X_source_train,X_source_train], axis=1)
 #        X_source_test=np.concatenate([X_source_test,X_source_test,X_source_test], axis=1)
-        X_dest_train,Y_dest_train, X_dest_test, Y_dest_test, n_classes2 = data_utils.load_image_dataset(img_dim, image_dim_ordering,dset='mnistM')
+        X_dest_train,Y_dest_train, X_dest_test, Y_dest_test, n_classes2 = data_utils.load_image_dataset(img_dim, image_dim_ordering,dset='mnistM',shuff=True)
     elif dset == "OfficeDslrToAmazon":
         X_source_train,Y_source_train,X_source_test, Y_source_test,n_classes1 = data_utils.load_image_dataset(img_dim, image_dim_ordering,dset='OfficeDslr')
         X_dest_train,Y_dest_train,X_dest_test, Y_dest_test, n_classes2 = data_utils.load_image_dataset(img_dim, image_dim_ordering,dset='OfficeAmazon')
@@ -131,7 +131,7 @@ def train(**kwargs):
     classificator_model.compile(loss='categorical_crossentropy',metrics=['accuracy'],optimizer=opt_C)
     zclass_model.compile(loss=['mse'],optimizer = opt_Z)
 
-    visualize = True
+    visualize = False
     ########        
     #MAKING TRAIN+TEST numpy array for global testing:
     ########
@@ -139,7 +139,7 @@ def train(**kwargs):
     Ytarget_dataset = np.concatenate([Y_dest_train,Y_dest_test],axis=0)    
 
     if resume: ########loading previous saved model weights and checking actual performance
-#        data_utils.load_model_weights(generator_model, discriminator_model, DCGAN_model, name,classificator_model,zclass_model)
+ #       data_utils.load_model_weights(generator_model, discriminator_model, DCGAN_model, name)
         data_utils.load_model_weights(generator_model, discriminator_model, DCGAN_model, name,classificator_model)
         loss4, acc4 = classificator_model.evaluate(Xtarget_dataset, Ytarget_dataset,batch_size=1024, verbose=0)                                                                                   
         print('\n Classifier Accuracy on full target domain:  %.2f%%' % (100 * acc4))

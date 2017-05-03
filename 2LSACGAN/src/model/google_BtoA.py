@@ -18,6 +18,7 @@ from google_models import *
 from additional_models import *
 from weightnorm import *
 from collections import deque
+from ImageDataGenerator import *
 
 def train(**kwargs):
     """
@@ -56,6 +57,7 @@ def train(**kwargs):
     wd = kwargs["wd"]
     history_size = kwargs["history_size"]
     monsterClass = kwargs["monsterClass"]
+    data_aug = kwargs["data_aug"]
     print("\nExperiment parameters:")
     for key in kwargs.keys():
         print key, kwargs[key]
@@ -132,7 +134,7 @@ def train(**kwargs):
     classificator_model.compile(loss='categorical_crossentropy',metrics=['accuracy'],optimizer=opt_C)
     zclass_model.compile(loss=['mse'],optimizer = opt_Z)
 
-    visualize = True
+    visualize = False
     ########        
     #MAKING TRAIN+TEST numpy array for global testing:
     ########
@@ -151,9 +153,17 @@ def train(**kwargs):
         zclass_loss = zclass_model.fit([X_gen,X_source_train],[X_gen],batch_size=256,epochs=10)
     ####train zclass regression model only if not resuming:
 
+
+    #####initialize history buffer and data augmentation
     gen_iterations = 0
     max_history_size = int( history_size * batch_size) 
     img_buffer = ImageHistoryBuffer((0,)+img_source_dim, max_history_size, batch_size, n_classes)
+    datagen = ImageDataGenerator(rotation_range=0.45,
+                                 width_shift_range=0.2,
+                                 height_shift_range=0.2,
+                                 fill_mode='nearest',
+                                 zoom_range = 0.1)
+
     #################
     # Start training
     ################
@@ -232,7 +242,11 @@ def train(**kwargs):
             ################
             ###CLASSIFIER TRAINING OUTSIDE DISC LOOP(wanna train in just 1 time even if disc_iter > 1)
             #################
-            class_loss_gen = classificator_model.train_on_batch(X_dest_batch, Y_dest_batch) #NO LABEL SMOOTHING!!!! inverted training w.r.t. to AtoB, because I have labels of A
+            if data_aug:
+                x_dest_batch = datagen.output(X_dest_batch)
+            else:
+                x_dest_batch = X_dest_batch               
+            class_loss_gen = classificator_model.train_on_batch(x_dest_batch, Y_dest_batch) #NO LABEL SMOOTHING!!!! inverted training w.r.t. to AtoB, because I have labels of A
             list_classifier_loss.appendleft(class_loss_gen[0])
             #######################
             # 2) Train the generator
@@ -272,7 +286,7 @@ def train(**kwargs):
             # plot images 1 times per epoch
             if batch_counter % (n_batch_per_epoch) == 0:
                 X_source_batch_plot,Y_source_batch_plot,idx_source_plot = next(data_utils.gen_batch(X_source_test,Y_source_test, batch_size=32))
-                data_utils.plot_generated_batch(X_dest_test,X_source_test, generator_model,noise_dim, image_dim_ordering,idx_source_plot,batch_size=32)
+                data_utils.plot_generated_batch(datagen.output(X_dest_test),X_source_test, generator_model,noise_dim, image_dim_ordering,idx_source_plot,batch_size=32)
             if gen_iterations % (n_batch_per_epoch*5) == 0:
                 if visualize:
                     BIG_ASS_VISUALIZATION_slerp(X_source_train[1], generator_model, noise_dim)

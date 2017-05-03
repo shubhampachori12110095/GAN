@@ -17,6 +17,7 @@ from scipy import ndimage
 from weightnorm import AdamWithWeightnorm, SGDWithWeightnorm
 from keras import backend as K
 import code
+from sklearn.utils import shuffle
 
 def lr_decay(models,decay_value):
     for model in models:
@@ -200,7 +201,7 @@ def load_celebA(img_dim, image_dim_ordering):
         return X_dest_train
 
 
-def load_image_dataset(img_dim, image_dim_ordering,dset='mnist'):
+def load_image_dataset(img_dim, image_dim_ordering,dset='mnist',shuff=False):
     #if dset == "celebA":
     #    X_train = load_celebA(img_dim, image_dim_ordering)
     if dset == "mnist":
@@ -242,8 +243,9 @@ def load_image_dataset(img_dim, image_dim_ordering,dset='mnist'):
                                                          n_channels=3, size=64, max=10000)
         X_test, Y_test, n_classes = load_lmdb_datasets(image_dim_ordering,lmdb_dir='/home/paolo/SSD_backup/SSD/digits/digits/jobs/20161108-142358-d9b8/val_db/',
                                                          n_channels=3, size=64, max=10000)
-
-
+    if shuff:
+        X_train, Y_train = shuffle(X_train, Y_train)
+        X_test, Y_test = shuffle(X_test, Y_test)
     return X_train, Y_train, X_test, Y_test, n_classes
 
     #if dset == "cifar10":
