@@ -22,6 +22,8 @@ from keras.constraints import unitnorm
 from functools import partial
 import tensorflow as tf
 from normalization import *
+
+
 def make_trainable(net, value):
     net.trainable = value
     for l in net.layers:
@@ -44,7 +46,7 @@ def visualize_model(model):
                         show_shapes=True,
                         show_layer_names=True)
 
-def generator_google_mnistM(noise_dim, img_source_dim,img_dest_dim,deterministic,pureGAN,wd):
+def generator_google_mnistM(noise_dim, img_source_dim,img_dest_dim,deterministic,pureGAN,wd,suffix=None):
     """DCGAN generator based on Upsampling and Conv2D
 
     Args:
@@ -101,8 +103,10 @@ def generator_google_mnistM(noise_dim, img_source_dim,img_dest_dim,deterministic
     # Last Conv to get the output image
     x1 = Conv2D(output_channels, (1, 1),name="gen_conv2d_final", border_mode='same', kernel_initializer="he_normal",W_regularizer=l2(wd))(x1)
     x1 = Activation('tanh')(x1)
-
-    generator_model = Model(input=[gen_noise_input,gen_image_input], output=[x1], name="generator_google")
+    if suffix is None:
+        generator_model = Model(input=[gen_noise_input,gen_image_input], output=[x1], name="generator_google1")
+    else:
+        generator_model = Model(input=[gen_noise_input,gen_image_input], output=[x1], name="generator_google2")
     visualize_model(generator_model)
     return generator_model
 
@@ -169,6 +173,38 @@ def discriminator_dcgan(img_dim,wd,n_classes,disc_type):
     visualize_model(discriminator_model)
     return discriminator_model
 
+def discriminator_dcgan_doubled(img_dim,wd,n_classes,disc_type):
+    min_s = img_dim[1]
+    disc_input = Input(shape=img_dim, name="discriminator_input")
+
+    # Get the list of number of conv filters
+    # (first layer starts with 64), filters are subsequently doubled
+    nb_conv =int(np.floor(np.log(min_s // 4) / np.log(2)))
+    list_f = [64 * min(8, (2 ** i)) for i in range(nb_conv)]
+
+    x = Conv2D(list_f[0], (3, 3), strides=(2, 2), name="disc_conv2d_1",
+                      border_mode="same",weight_norm=False, kernel_initializer=RandomNormal(stddev=0.02),kernel_regularizer=l2(wd))(disc_input)
+    x=BatchNormalization(axis=1)(x)
+    x = LeakyReLU(0.2)(x)
+    for i, f in enumerate(list_f[1:]):
+        name = "disc_conv2d_%s" % (i + 2)
+        x = Conv2D(f, (3, 3), strides=(2, 2), name=name,
+                      border_mode="same",weight_norm=False, kernel_initializer=RandomNormal(stddev=0.02),kernel_regularizer=l2(wd))(x)
+        x=BatchNormalization(axis=1)(x)
+        x = LeakyReLU(0.2)(x)
+    aux = x
+    x = Conv2D(1, (3, 3), strides=(1, 1), name="finale_conv",
+                      border_mode="same",weight_norm=False, kernel_initializer=RandomNormal(stddev=0.02),kernel_regularizer=l2(wd))(x)
+    aux = Flatten()(aux)
+    aux = Dense(n_classes, activation='softmax', name='auxiliary',W_regularizer=l2(wd))(aux)
+    x = GlobalAveragePooling2D()(x)
+    discriminator_model_domain = Model(input=[disc_input], output=[x], name="discriminator_domain")
+    discriminator_model_class = Model(input=[disc_input], output=[aux], name="discriminator_class")
+
+    visualize_model(discriminator_model_domain)
+    visualize_model(discriminator_model_class)
+    return discriminator_model_domain, discriminator_model_class
+
 def discriminator_custom(img_dim,wd):
     min_s = img_dim[1]
     disc_input = Input(shape=img_dim, name="discriminator_input")
@@ -208,7 +244,7 @@ def classificator_google_mnistM(img_dim,n_classes,wd):
     x = Flatten()(x)
     x = Dense(100, init="he_normal",activation="relu", name='fc1',W_regularizer=l2(wd))(x)
     x = Dense(100, init="he_normal",activation="relu", name='fc2',W_regularizer=l2(wd))(x)
-    x = Dense(n_classes, init="he_normal",activation="sigmoid", name='fc_softmax',W_regularizer=l2(wd))(x)
+    x = Dense(n_classes, init="he_normal",activation="softmax", name='fc_softmax',W_regularizer=l2(wd))(x)
     classifier_model = Model(input=input,output=x,name="classifier")
     visualize_model(classifier_model)
     return classifier_model
@@ -289,6 +325,52 @@ def DCGAN_naive(generator, discriminator, noise_dim, img_source_dim):
     visualize_model(DCGAN)
 
     return DCGAN
+
+def DCGAN_naive2(generator, discriminator, noise_dim, img_source_dim):
+    """DCGAN generator + discriminator model
+
+    Args:
+        generator: keras generator model
+        discriminator: keras discriminator model
+        noise_dim: generator input noise dimension
+        img_dim: real image data dimension
+
+    Returns:
+        keras model
+    """
+    noise_input = Input(shape=noise_dim, name="noise_input")
+    image_input = Input(shape=img_source_dim, name="image_input")
+
+    generated_image = generator([noise_input,image_input])
+    DCGAN_output = discriminator(generated_image)
+    DCGAN = Model(input=[noise_input,image_input],
+                  output=DCGAN_output)
+    visualize_model(DCGAN)
+
+    return DCGAN
+
+def reconstructor(generator, discriminator, noise_dim, img_source_dim):
+    """DCGAN generator + discriminator model
+
+    Args:
+        generator: keras generator model
+        discriminator: keras discriminator model
+        noise_dim: generator input noise dimension
+        img_dim: real image data dimension
+
+    Returns:
+        keras model
+    """
+    noise_input = Input(shape=noise_dim, name="noise_input")
+    noise_input2 = Input(shape=noise_dim, name="noise_input2")
+    image_input = Input(shape=img_source_dim, name="image_input")
+
+    generated_image = generator([noise_input,image_input])
+    reconstructor_output = discriminator([noise_input2,generated_image])
+    reconstructor = Model(input=[noise_input,image_input,noise_input2],
+                  output=reconstructor_output)
+    visualize_model(reconstructor)
+    return reconstructor
 
 class RandomWeightedAverage(_Merge):
     """Takes a randomly-weighted average of two tensors. In geometric terms, this outputs a random point on the line

@@ -1,4 +1,3 @@
-
 from __future__ import absolute_import
 from __future__ import print_function
 
@@ -9,9 +8,126 @@ import scipy.ndimage as ndi
 # from six.moves import range
 import os
 import threading
-
+#from scipy.ndimage.interpolation import map_coordinates
+#from scipy.ndimage.filters import gaussian_filter
 from keras import backend as K
+import code
+from numpy.random import random_integers
+from scipy.signal import convolve2d
+import math
 
+def create_2d_gaussian(dim, sigma):
+    """
+    This function creates a 2d gaussian kernel with the standard deviation
+    denoted by sigma
+    
+    :param dim: integer denoting a side (1-d) of gaussian kernel
+    :type dim: int
+    :param sigma: the standard deviation of the gaussian kernel
+    :type sigma: float
+    
+    :returns: a numpy 2d array
+    """
+
+    # check if the dimension is odd
+    if dim % 2 == 0:
+        raise ValueError("Kernel dimension should be odd")
+
+    # initialize the kernel
+    kernel = np.zeros((dim, dim), dtype=np.float16)
+
+    # calculate the center point
+    center = dim/2
+
+    # calculate the variance
+    variance = sigma ** 2
+    
+    # calculate the normalization coefficeint
+    coeff = 1. / (2 * variance)
+
+    # create the kernel
+    for x in range(0, dim):
+        for y in range(0, dim):
+            x_val = abs(x - center)
+            y_val = abs(y - center)
+            numerator = x_val**2 + y_val**2
+            denom = 2*variance
+            
+            kernel[x,y] = coeff * np.exp(-1. * numerator/denom)
+    
+    # normalise it
+    return kernel/sum(sum(kernel))
+
+def elastic_transform(image, sigma=6, alpha=18):
+#https://github.com/vsvinayak/mnist-helper/blob/master/mnist_helpers.py
+    image=image[0]    
+    image= ((image * 0.5 + 0.5) * 255.).astype(np.uint8)
+#    image = 255-image
+    kernel_dim = 15
+    # create an empty image
+    result = np.zeros(image.shape)
+
+    # create random displacement fields
+    displacement_field_x = np.array([[random_integers(-1, 1) for x in xrange(image.shape[0])] \
+                            for y in xrange(image.shape[1])]) * alpha
+    displacement_field_y = np.array([[random_integers(-1, 1) for x in xrange(image.shape[0])] \
+                            for y in xrange(image.shape[1])]) * alpha
+
+    # create the gaussian kernel
+    kernel = create_2d_gaussian(kernel_dim, sigma)
+
+    # convolve the fields with the gaussian kernel
+    displacement_field_x = convolve2d(displacement_field_x, kernel)
+    displacement_field_y = convolve2d(displacement_field_y, kernel)
+
+    # make the distortrd image by averaging each pixel value to the neighbouring
+    # four pixels based on displacement fields
+    
+    for row in xrange(image.shape[1]):
+        for col in xrange(image.shape[0]):
+            low_ii = row + int(math.floor(displacement_field_x[row, col]))
+            high_ii = row + int(math.ceil(displacement_field_x[row, col]))
+
+            low_jj = col + int(math.floor(displacement_field_y[row, col]))
+            high_jj = col + int(math.ceil(displacement_field_y[row, col]))
+
+            if low_ii < 0 or low_jj < 0 or high_ii >= image.shape[1] -1 \
+               or high_jj >= image.shape[0] - 1:
+                continue
+
+            res = image[low_ii, low_jj]/4 + image[low_ii, high_jj]/4 + \
+                    image[high_ii, low_jj]/4 + image[high_ii, high_jj]/4
+
+            result[row, col] = res
+#    result = 255-result
+    result = ((result/255) - 0.5) / 0.5
+    return result
+
+def elastic_transform_backup(image, alpha=36, sigma=8, random_state=None):
+    """Elastic deformation of images as described in [Simard2003]_.
+    .. [Simard2003] Simard, Steinkraus and Platt, "Best Practices for
+       Convolutional Neural Networks applied to Visual Document Analysis", in
+       Proc. of the International Conference on Document Analysis and
+       Recognition, 2003.
+    """
+#    code.interact(local=locals())
+    image=image[0]
+    assert len(image.shape)==2
+
+    if random_state is None:
+        random_state = np.random.RandomState(None)
+
+    shape = image.shape
+
+    dx = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma, mode="constant", cval=0) * alpha
+    dy = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma, mode="constant", cval=0) * alpha
+
+    x, y = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), indexing='ij')
+    indices = np.reshape(x+dx, (-1, 1)), np.reshape(y+dy, (-1, 1))
+
+    result = map_coordinates(image, indices, order=1).reshape(shape)
+    result = result[np.newaxis,:]
+    return result
 
 def random_channel_shift(x, intensity, channel_index=0):
     x = np.rollaxis(x, channel_index, 0)
@@ -90,7 +206,6 @@ def img_to_array(img, dim_ordering='default'):
     return x
 
 class NumpyArrayIterator():
-
     def __init__(self, X, y, image_data_generator,
                  batch_size=32, shuffle=False, seed=None,
                  dim_ordering='default',
@@ -128,6 +243,7 @@ class ImageDataGenerator(object):
                  horizontal_flip=False,
                  vertical_flip=False,
                  rescale=None,
+                 elastic_distortion=False,
                  dim_ordering='default'):
         if dim_ordering == 'default':
             dim_ordering = K.image_dim_ordering()
@@ -150,7 +266,7 @@ class ImageDataGenerator(object):
             self.channel_index = 3
             self.row_index = 1
             self.col_index = 2
-
+        self.random_state = np.random.RandomState(None)
         if np.isscalar(zoom_range):
             self.zoom_range = [1 - zoom_range, 1 + zoom_range]
         elif len(zoom_range) == 2:
@@ -221,6 +337,9 @@ class ImageDataGenerator(object):
         if self.vertical_flip:
             if np.random.random() < 0.5:
                 x = flip_axis(x, img_row_index)
+
+        if self.elastic_distortion:
+            x =  elastic_transform(x)
 
         # TODO:
         # channel-wise normalization

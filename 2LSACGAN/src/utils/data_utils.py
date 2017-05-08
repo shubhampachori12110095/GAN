@@ -138,9 +138,61 @@ def load_mnistM(image_dim_ordering):
     return X_train, Y_train, X_test, Y_test,nb_classes
 
 
+def load_svhn(image_dim_ordering):
+    #Loading mnist labels, they should be the same of mnistM
+    X_train=np.load("../data/svhn_train_data.npy")
+    y_train=np.load("../data/svhn_train_labels.npy")
+    X_test=np.load("../data/svhn_test_data.npy") 
+    y_test=np.load("../data/svhn_test_labels.npy")
+    if image_dim_ordering == 'th':
+        X_train = X_train.reshape(X_train.shape[0], 3, 28, 28)
+        X_test = X_test.reshape(X_test.shape[0], 3, 28, 28)
+    else:
+        X_train = X_train.reshape(X_train.shape[0], 28, 28, 3)
+        X_test = X_test.reshape(X_test.shape[0], 28, 28, 3)
+    X_train = X_train.astype('float32')
+    X_test = X_test.astype('float32')
+    #code.interact(local=locals())
+    X_train = normalization(X_train, image_dim_ordering)
+    X_test = normalization(X_test, image_dim_ordering)
+
+    nb_classes =10 # len(np.unique(np.hstack((y_train, y_test))))
+
+    Y_train = y_train #np_utils.to_categorical(y_train, nb_classes)
+    Y_test = y_test #np_utils.to_categorical(y_test, nb_classes)
+    return X_train, Y_train, X_test, Y_test,nb_classes
+
+
 def load_mnist(image_dim_ordering):
 
     (X_train, y_train), (X_test, y_test) = mnist.load_data()
+
+    if image_dim_ordering == 'th':
+        X_train = X_train.reshape(X_train.shape[0], 1, 28, 28)
+        X_test = X_test.reshape(X_test.shape[0], 1, 28, 28)
+    else:
+        X_train = X_train.reshape(X_train.shape[0], 28, 28, 1)
+        X_test = X_test.reshape(X_test.shape[0], 28, 28, 1)
+
+    X_train = X_train.astype('float32')
+    X_test = X_test.astype('float32')
+
+    X_train = normalization(X_train, image_dim_ordering)
+    X_test = normalization(X_test, image_dim_ordering)
+
+    nb_classes = len(np.unique(np.hstack((y_train, y_test))))
+
+    Y_train = np_utils.to_categorical(y_train, nb_classes)
+    Y_test = np_utils.to_categorical(y_test, nb_classes)
+
+    return X_train, Y_train, X_test, Y_test, nb_classes
+
+def load_usps(image_dim_ordering):
+
+    X_train=np.load("../data/usps_data.npy")
+    y_train=np.load("../data/usps_labels.npy")
+    X_test=X_train 
+    y_test=y_train
 
     if image_dim_ordering == 'th':
         X_train = X_train.reshape(X_train.shape[0], 1, 28, 28)
@@ -208,6 +260,10 @@ def load_image_dataset(img_dim, image_dim_ordering,dset='mnist',shuff=False):
         X_train, Y_train, X_test, Y_test, n_classes = load_mnist(image_dim_ordering)
     elif dset == "mnistM":
         X_train, Y_train, X_test, Y_test, n_classes = load_mnistM(image_dim_ordering)
+    elif dset == "svhn":
+        X_train, Y_train, X_test, Y_test, n_classes = load_svhn(image_dim_ordering)
+    elif dset == "usps":
+        X_train, Y_train, X_test, Y_test, n_classes = load_usps(image_dim_ordering)
     elif dset == "OfficeDslr":
         X_train, Y_train, n_classes = load_lmdb_datasets(image_dim_ordering,lmdb_dir='/home/paolo/SSD_backup/SSD/digits/digits/jobs/20170412-163620-984b/train_db/',n_channels=3,size=64,max=399)
         X_test, Y_test, n_classes = load_lmdb_datasets(image_dim_ordering,lmdb_dir=  '/home/paolo/SSD_backup/SSD/digits/digits/jobs/20170412-163620-984b/val_db/',n_channels=3,size=64,max=99)
@@ -314,11 +370,11 @@ def get_disc_batch(X_dest_batch, generator_model, batch_counter, batch_size, noi
     return X_disc_real, X_disc_gen
 
 
-def save_model_weights(generator_model, discriminator_model, DCGAN_model, e, name,classifier_model=None,zclass_model=None):
+def save_model_weights(generator_model, discriminator_model, DCGAN_model, e, name,classifier_model=None,zclass_model=None,discriminator2=None):
 
     model_path = "../../models/DCGAN"
 
-    if e % 5 == 0:
+    if (e % 5) == 0:
         gen_weights_path = os.path.join(model_path, name+'_gen.h5')
         generator_model.save_weights(gen_weights_path, overwrite=True)
 
@@ -333,8 +389,12 @@ def save_model_weights(generator_model, discriminator_model, DCGAN_model, e, nam
         if zclass_model is not None:
             zclass_weights_path = os.path.join(model_path, name+'_zclass.h5')
             zclass_model.save_weights(zclass_weights_path, overwrite=True)
+        if discriminator2 is not None:
+            disc2_weights_path = os.path.join(model_path, name+'_disc2.h5')
+            discriminator2.save_weights(disc2_weights_path, overwrite=True)
+        print("epoch %d, Saved weights!" % e)
 
-def load_model_weights(generator_model, discriminator_model, DCGAN_model, name, classifier_model=None):
+def load_model_weights(generator_model, discriminator_model, DCGAN_model, name, classifier_model=None,discriminator2=None):
     model_path = "../../models/DCGAN"
 
     gen_weights_path = os.path.join(model_path, name+'_gen.h5')
@@ -350,13 +410,24 @@ def load_model_weights(generator_model, discriminator_model, DCGAN_model, name, 
         class_weights_path = os.path.join(model_path, name+'_class.h5')
         classifier_model.load_weights(class_weights_path)
 
-def plot_generated_batch(X_dest,X_source, generator_model, noise_dim, image_dim_ordering, idx, noise_scale=0.5,batch_size=32):
+    if discriminator2 is not None:       
+        disc2_weights_path = os.path.join(model_path, name+'_disc2.h5')
+        discriminator2.load_weights(disc2_weights_path)
+
+def plot_generated_batch(X_dest,X_source, generator_model, noise_dim, image_dim_ordering, idx, noise_scale=0.5,batch_size=32,different_idx=False,datagen=None,data_aug=False):
     plt.figure(figsize=(20,20))
     # Generate images
 #    X_gen = sample_noise_uniform(noise_scale, batch_size, noise_dim)
     X_gen = sample_noise(noise_scale, batch_size, noise_dim)
     source_images = X_source[idx]
-    dest_images = X_dest[idx]
+    if different_idx:
+        idx2 = np.random.randint(X_dest.shape[0],size=batch_size)
+    else:
+        idx2=idx
+    if data_aug:
+        dest_images = datagen.output(X_dest[idx2])
+    else:
+        dest_images = X_dest[idx2]
 #    source_images = X_source[np.random.randint(0,X_source.shape[0],size=batch_size),:,:,:]
     X_gen = generator_model.predict([X_gen,source_images])
     
@@ -403,12 +474,13 @@ def plot_generated_batch(X_dest,X_source, generator_model, noise_dim, image_dim_
         plt.imshow(Xs[:, :, 0], cmap="gray")
     else:
         plt.imshow(Xs)
-    plt.show()
+    plt.show(block=True)
 
-    plt.pause(0.01)    
+    plt.pause(0.05)    
     #plt.savefig("../../figures/current_batch.png")
     #plt.clf()
     #plt.close()
+    return idx2
 
 def create_stepped_cols(n,m): # n = number of cols
     out = np.zeros((n,m,n))

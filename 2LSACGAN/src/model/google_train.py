@@ -70,6 +70,9 @@ def train(**kwargs):
 #        X_source_train=np.concatenate([X_source_train,X_source_train,X_source_train], axis=1)
 #        X_source_test=np.concatenate([X_source_test,X_source_test,X_source_test], axis=1)
         X_dest_train,Y_dest_train, X_dest_test, Y_dest_test, n_classes2 = data_utils.load_image_dataset(img_dim, image_dim_ordering,dset='mnistM',shuff=True)
+    elif dset == "mnist_to_svhn":
+        X_source_train,Y_source_train, X_source_test, Y_source_test, n_classes1 = data_utils.load_image_dataset(img_dim, image_dim_ordering,dset='mnist',shuff=True)
+        X_dest_train,Y_dest_train, X_dest_test, Y_dest_test, n_classes2 = data_utils.load_image_dataset(img_dim, image_dim_ordering,dset='svhn',shuff=True)
     elif dset == "OfficeDslrToAmazon":
         X_source_train,Y_source_train,X_source_test, Y_source_test,n_classes1 = data_utils.load_image_dataset(img_dim, image_dim_ordering,dset='OfficeDslr')
         X_dest_train,Y_dest_train,X_dest_test, Y_dest_test, n_classes2 = data_utils.load_image_dataset(img_dim, image_dim_ordering,dset='OfficeAmazon')
@@ -99,10 +102,10 @@ def train(**kwargs):
     discriminator_model = models.discriminator_dcgan(img_dest_dim, wd,n_classes,disc_type)       
     classificator_model = models.classificator_google_mnistM(img_dest_dim,n_classes, wd)
     DCGAN_model = models.DCGAN_naive(generator_model, discriminator_model, noise_dim, img_source_dim)
-    zclass_model = z_coerence(generator_model,img_source_dim, bn_mode,wd,inject_noise,n_classes,noise_dim, model_name="zClass")
+    if not deterministic:
+        zclass_model = z_coerence(generator_model,img_source_dim, bn_mode,wd,inject_noise,n_classes,noise_dim, model_name="zClass")
 #    GenToClassifier_model = models.GenToClassifierModel(generator_model, classificator_model, noise_dim, img_source_dim)
-    #disc_penalty_model = models.disc_penalty(discriminator_model,noise_dim,img_source_dim,opt_D,model_name="disc_penalty_model")    
-    zclass_model = z_coerence(generator_model,img_source_dim, bn_mode,wd,inject_noise,n_classes,noise_dim, model_name="zClass")
+    #disc_penalty_model = models.disc_penalty(discriminator_model,noise_dim,img_source_dim,opt_D,model_name="disc_penalty_model"
 
     ############################
     # Compile models
@@ -129,7 +132,8 @@ def train(**kwargs):
 #    GenToClassifier_model.compile(loss='categorical_crossentropy', optimizer=opt_GC)
     models.make_trainable(classificator_model, True)
     classificator_model.compile(loss='categorical_crossentropy',metrics=['accuracy'],optimizer=opt_C)
-    zclass_model.compile(loss=['mse'],optimizer = opt_Z)
+    if not deterministic:
+        zclass_model.compile(loss=['mse'],optimizer = opt_Z)
 
     visualize = False
     ########        
@@ -146,7 +150,8 @@ def train(**kwargs):
 
     else:
         X_gen = data_utils.sample_noise(noise_scale, X_source_train.shape[0], noise_dim)
-        zclass_loss = zclass_model.fit([X_gen,X_source_train],[X_gen],batch_size=256,epochs=10)
+        if not deterministic:
+            zclass_loss = zclass_model.fit([X_gen,X_source_train],[X_gen],batch_size=256,epochs=10)
     ####train zclass regression model only if not resuming:
 
     gen_iterations = 0
@@ -201,7 +206,10 @@ def train(**kwargs):
                         current_labels_real = np.ones(X_disc_real.shape[0]) 
                         current_labels_gen = np.zeros(X_disc_gen.shape[0]) 
                     elif disc_type == "nclass_disc":
-                        virtual_real_labels =np.zeros([X_disc_gen.shape[0],n_classes])
+                        (disc_p, class_p) = discriminator_model.predict_on_batch(X_disc_real)
+                        idx = np.argmax(class_p, axis=1)
+                        virtual_real_labels = (idx[:, None] == np.arange(n_classes)) * 1
+                        #virtual_real_labels =np.zeros([X_disc_gen.shape[0],n_classes])
                         current_labels_real = [np.ones(X_disc_real.shape[0]),virtual_real_labels]
                         current_labels_gen =[np.zeros(X_disc_gen.shape[0]), Y_source_batch ]
                 ##############
@@ -229,7 +237,7 @@ def train(**kwargs):
             ################
             ###CLASSIFIER TRAINING OUTSIDE DISC LOOP(wanna train in just 1 time even if disc_iter > 1)
             #################
-            class_loss_gen = classificator_model.train_on_batch(X_disc_gen, Y_source_batch*0.7) #LABEL SMOOTHING!!!!
+            class_loss_gen = classificator_model.train_on_batch(X_disc_gen, Y_source_batch*1.0) #LABEL SMOOTHING!!!!
             list_classifier_loss.appendleft(class_loss_gen[1])
             #######################
             # 2) Train the generator
@@ -246,9 +254,9 @@ def train(**kwargs):
                     gen_loss = gen_loss[0]
             list_gen_loss.appendleft(gen_loss)
 
-
-            zclass_loss = zclass_model.train_on_batch([X_gen,X_source_batch2],[X_gen])
-            list_zclass_loss.appendleft(zclass_loss)
+            if not deterministic:
+                zclass_loss = zclass_model.train_on_batch([X_gen,X_source_batch2],[X_gen])
+                list_zclass_loss.appendleft(zclass_loss)
             ##############
             #Train the generator w.r.t the aux classifier:
             #############
@@ -283,7 +291,8 @@ def train(**kwargs):
         print('\nEpoch %s/%s, Time: %s' % (e + 1, nb_epoch, time.time() - start))
 
         # Save model weights (by default, every 5 epochs)
-        data_utils.save_model_weights(generator_model, discriminator_model, DCGAN_model, e, name,classificator_model,zclass_model)
+
+        data_utils.save_model_weights(generator_model, discriminator_model, DCGAN_model, e, name,classificator_model)
 
         #testing accuracy of trained classifier 
         loss4, acc4 = classificator_model.evaluate(Xtarget_dataset, Ytarget_dataset,batch_size=1024, verbose=0)                                                                                   
