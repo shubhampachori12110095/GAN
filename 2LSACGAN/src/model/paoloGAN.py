@@ -172,9 +172,8 @@ def get_loss_list():
     list_gen_loss = deque(10 * [0], 10)
     list_zclass_loss = deque(10 * [0], 10)
     list_classifier_loss = deque(10 * [0], 10)
-    l_rec2 = deque(10 * [0], 10)
-    l_rec1 = deque(10 * [0], 10)
-    return list_disc_loss_real, list_disc_loss_gen, list_gen_loss, list_zclass_loss, list_classifier_loss, l_rec1, l_rec2
+    l_rec = deque(10 * [0], 10)
+    return list_disc_loss_real, list_disc_loss_gen, list_gen_loss, list_zclass_loss, list_classifier_loss, l_rec
 
 def get_batch(A_data, A_labels, B_data, B_labels, batch_size):
     A_data_batch, A_labels_batch, _ = next(data_utils.gen_batch(A_data, A_labels, batch_size))
@@ -284,13 +283,14 @@ def train_class(GAN, l_class,  A_data_batch, A_labels_batch):
     l_class.appendleft(class_loss[0])
     return l_class
 
-def train_rec(GAN,rec1,rec2,  A_data_batch, B_data_batch):
+def train_rec(GAN,rec1, rec2, A_data_batch, B_data_batch, l_rec1, l_rec2):
     X_noise = data_utils.sample_noise(GAN.noise_scale, GAN.batch_size, GAN.noise_dim)
     X_noise2 = data_utils.sample_noise(GAN.noise_scale, GAN.batch_size, GAN.noise_dim)
-    rec_loss = rec1.train_on_batch([X_noise, A_data_batch,X_noise2],A_data_batch)
-    rec_loss2 = rec2.train_on_batch([X_noise, B_data_batch,X_noise2],B_data_batch)
-#    l_class.appendleft(class_loss[0])
-    return rec_loss, rec_loss2
+    rec_loss = rec1.train_on_batch([X_noise, A_data_batch,X_noise2],A_data_batch,sample_weight=np.ones(GAN.batch_size)*10)
+    rec_loss2 = rec2.train_on_batch([X_noise, B_data_batch,X_noise2],B_data_batch,sample_weight=np.ones(GAN.batch_size)*10)
+    l_rec1.appendleft(rec_loss)
+    l_rec2.appendleft(rec_loss2)
+    return l_rec1, l_rec2
 
 
 def train_gen_zclass(generator_model, DCGAN_model, zclass_model, disc_type, deterministic, noise_dim, noise_scale, batch_size, l_gen, l_zclass, X_source, Y_source, n_classes):
@@ -498,10 +498,10 @@ def train(**kwargs):
         batch_counter = 1
         start = time.time()
         while batch_counter < n_batch_per_epoch:
-            l_disc_real1, l_disc_gen1, l_gen1, l_z1, l_class1,l_rec1, l_rec2 = get_loss_list()
+            l_disc_real1, l_disc_gen1, l_gen1, l_z1, l_class1,l_rec1 = get_loss_list()
             A_data_batch, A_labels_batch, B_data_batch, B_labels_batch = train_gan(GAN1, GAN1.disc_iters, A_data, A_labels, B_data, B_labels, batch_counter, l_disc_real1, l_disc_gen1, l_gen1)
 
-            l_disc_real2, l_disc_gen2, l_gen2, l_z2, l_class2 = get_loss_list()
+            l_disc_real2, l_disc_gen2, l_gen2, l_z2, l_class2, l_rec2 = get_loss_list()
             A_data_batch, A_labels_batch, B_data_batch, B_labels_batch = train_gan(GAN2, GAN2.disc_iters, A_data, A_labels, B_data, B_labels, batch_counter, l_disc_real2, l_disc_gen2,l_gen2)
 
             train_rec(GAN1, rec1, rec2, A_data_batch, B_data_batch,l_rec1, l_rec2) #BRINGING US TO L.A.? :)
