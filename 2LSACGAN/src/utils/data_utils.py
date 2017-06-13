@@ -8,8 +8,8 @@ import matplotlib.pylab as plt
 import matplotlib.gridspec as gridspec
 import matplotlib
 from keras.optimizers import Adam, SGD, RMSprop
-import caffe
-import lmdb
+#import caffe
+#import lmdb
 import PIL.Image
 from StringIO import StringIO
 import scipy.misc
@@ -162,6 +162,84 @@ def load_svhn(image_dim_ordering):
     Y_test = y_test #np_utils.to_categorical(y_test, nb_classes)
     return X_train, Y_train, X_test, Y_test,nb_classes
 
+def load_svhn32(image_dim_ordering):
+    #Loading mnist labels, they should be the same of mnistM
+    X_train=np.load("../data/svhn_train_images32.npy")
+    y_train=np.load("../data/svhn_train_labels.npy")
+    X_test=np.load("../data/svhn_test_images_color.npy")
+    y_test=np.load("../data/svhn_test_labels.npy")
+    if image_dim_ordering == 'th':
+        X_train = X_train.reshape(X_train.shape[0], 3, 32, 32)
+        X_test = X_test.reshape(X_test.shape[0], 3, 32, 32)
+    else:
+        X_train = X_train.reshape(X_train.shape[0], 32, 32, 3)
+        X_test = X_test.reshape(X_test.shape[0], 32, 32, 3)
+    X_train = X_train.astype('float32')
+    X_test = X_test.astype('float32')
+    #code.interact(local=locals())
+    X_train = normalization(X_train, image_dim_ordering)
+    X_test = normalization(X_test, image_dim_ordering)
+
+    nb_classes =10 # len(np.unique(np.hstack((y_train, y_test))))
+#    code.interact(local=locals())
+
+    Y_train = np_utils.to_categorical(y_train, nb_classes)
+    Y_test = np_utils.to_categorical(y_test, nb_classes)
+    return X_train, Y_train, X_test, Y_test,nb_classes
+
+def load_svhn32gray(image_dim_ordering):
+    #Loading mnist labels, they should be the same of mnistM
+    X_train=np.load("../data/svhn_train_gray32.npy")
+    y_train=np.load("../data/svhn_train_labels.npy")
+    X_test=np.load("../data/svhn_test_gray32.npy")
+    y_test=np.load("../data/svhn_test_labels.npy")
+    if image_dim_ordering == 'th':
+        X_train = X_train.reshape(X_train.shape[0], 1, 32, 32)
+        X_test = X_test.reshape(X_test.shape[0], 1, 32, 32)
+    else:
+        X_train = X_train.reshape(X_train.shape[0], 32, 32, 1)
+        X_test = X_test.reshape(X_test.shape[0], 32, 32, 1)
+    X_train = X_train.astype('float32')
+    X_test = X_test.astype('float32')
+    #code.interact(local=locals())
+    X_train = normalization(X_train, image_dim_ordering)
+    X_test = normalization(X_test, image_dim_ordering)
+
+    nb_classes =10 # len(np.unique(np.hstack((y_train, y_test))))
+#    code.interact(local=locals())
+
+    Y_train = np_utils.to_categorical(y_train, nb_classes)
+    Y_test = np_utils.to_categorical(y_test, nb_classes)
+    return X_train, Y_train, X_test, Y_test,nb_classes
+
+
+def load_mnist32(image_dim_ordering):
+
+    X_train=np.load("../data/mnist_train_images32.npy")
+    y_train=np.load("../data/mnist_train_labels.npy")
+    X_test=np.load("../data/mnist_test_images32.npy")
+    y_test=np.load("../data/mnist_test_labels.npy")
+
+    if image_dim_ordering == 'th':
+        X_train = X_train.reshape(X_train.shape[0], 1, 32, 32)
+        X_test = X_test.reshape(X_test.shape[0], 1, 32, 32)
+    else:
+        X_train = X_train.reshape(X_train.shape[0], 32, 32, 1)
+        X_test = X_test.reshape(X_test.shape[0], 32, 32, 1)
+
+    X_train = X_train.astype('float32')
+    X_test = X_test.astype('float32')
+
+    X_train = normalization(X_train, image_dim_ordering)
+    X_test = normalization(X_test, image_dim_ordering)
+
+    nb_classes = 10
+
+    Y_train = np_utils.to_categorical(y_train, nb_classes)
+    Y_test = np_utils.to_categorical(y_test, nb_classes)
+
+    return X_train, Y_train, X_test, Y_test, nb_classes
+
 
 def load_mnist(image_dim_ordering):
 
@@ -186,6 +264,7 @@ def load_mnist(image_dim_ordering):
     Y_test = np_utils.to_categorical(y_test, nb_classes)
 
     return X_train, Y_train, X_test, Y_test, nb_classes
+
 
 def load_usps(image_dim_ordering):
 
@@ -258,10 +337,16 @@ def load_image_dataset(img_dim, image_dim_ordering,dset='mnist',shuff=False):
     #    X_train = load_celebA(img_dim, image_dim_ordering)
     if dset == "mnist":
         X_train, Y_train, X_test, Y_test, n_classes = load_mnist(image_dim_ordering)
+    if dset == "mnist32":
+        X_train, Y_train, X_test, Y_test, n_classes = load_mnist32(image_dim_ordering)
     elif dset == "mnistM":
         X_train, Y_train, X_test, Y_test, n_classes = load_mnistM(image_dim_ordering)
     elif dset == "svhn":
         X_train, Y_train, X_test, Y_test, n_classes = load_svhn(image_dim_ordering)
+    elif dset == "svhn32":
+        X_train, Y_train, X_test, Y_test, n_classes = load_svhn32(image_dim_ordering)
+    elif dset == "svhn32gray":
+        X_train, Y_train, X_test, Y_test, n_classes = load_svhn32gray(image_dim_ordering)
     elif dset == "usps":
         X_train, Y_train, X_test, Y_test, n_classes = load_usps(image_dim_ordering)
     elif dset == "OfficeDslr":
@@ -374,7 +459,7 @@ def save_model_weights(generator_model, discriminator_model, DCGAN_model, e, nam
 
     model_path = "../../models/DCGAN"
 
-    if (e % 5) == 0:
+    if (e % 1) == 0:
         gen_weights_path = os.path.join(model_path, name+'_gen.h5')
         generator_model.save_weights(gen_weights_path, overwrite=True)
 
@@ -403,8 +488,8 @@ def load_model_weights(generator_model, discriminator_model, DCGAN_model, name, 
     disc_weights_path = os.path.join(model_path, name+'_disc.h5')
     discriminator_model.load_weights(disc_weights_path)
 
-    DCGAN_weights_path = os.path.join(model_path, name+'_DCGAN.h5')
-    DCGAN_model.load_weights(DCGAN_weights_path)
+    #DCGAN_weights_path = os.path.join(model_path, name+'_DCGAN.h5')
+    #DCGAN_model.load_weights(DCGAN_weights_path)
 
     if classifier_model is not None:       
         class_weights_path = os.path.join(model_path, name+'_class.h5')

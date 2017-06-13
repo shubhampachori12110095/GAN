@@ -349,7 +349,7 @@ def DCGAN_naive2(generator, discriminator, noise_dim, img_source_dim):
 
     return DCGAN
 
-def reconstructor(generator, discriminator, noise_dim, img_source_dim):
+def reconstructor(generator1, generator2, noise_dim, img_source_dim):
     """DCGAN generator + discriminator model
 
     Args:
@@ -365,12 +365,38 @@ def reconstructor(generator, discriminator, noise_dim, img_source_dim):
     noise_input2 = Input(shape=noise_dim, name="noise_input2")
     image_input = Input(shape=img_source_dim, name="image_input")
 
-    generated_image = generator([noise_input,image_input])
-    reconstructor_output = discriminator([noise_input2,generated_image])
+    generated_image = generator1([noise_input,image_input])
+    reconstructor_output = generator2([noise_input2,generated_image])
     reconstructor = Model(input=[noise_input,image_input,noise_input2],
                   output=reconstructor_output)
     visualize_model(reconstructor)
     return reconstructor
+
+
+def reconstructorClass(generator1, generator2, classificator, noise_dim, img_source_dim):
+    """DCGAN generator + discriminator model
+
+    Args:
+        generator: keras generator model
+        discriminator: keras discriminator model
+        noise_dim: generator input noise dimension
+        img_dim: real image data dimension
+
+    Returns:
+        keras model
+    """
+    noise_input = Input(shape=noise_dim, name="noise_input")
+    noise_input2 = Input(shape=noise_dim, name="noise_input2")
+    image_input = Input(shape=img_source_dim, name="image_input")
+
+    generated_image = generator1([noise_input,image_input])
+    reconstructor_output = generator2([noise_input2,generated_image])
+    recClass_output = classificator(reconstructor_output)
+    reconstructor = Model(input=[noise_input,image_input,noise_input2],
+                  output=recClass_output)
+    visualize_model(reconstructor)
+    return reconstructor
+
 
 class RandomWeightedAverage(_Merge):
     """Takes a randomly-weighted average of two tensors. In geometric terms, this outputs a random point on the line

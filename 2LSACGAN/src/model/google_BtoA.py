@@ -107,8 +107,7 @@ def train(**kwargs):
     discriminator_model,discriminator2 = models.discriminator_dcgan_doubled(img_dest_dim, wd,n_classes,disc_type)       
     classificator_model = models.classificator_google_mnistM(img_dest_dim,n_classes, wd)
     DCGAN_model = models.DCGAN_naive(generator_model, discriminator_model, noise_dim, img_source_dim)
-    DCGAN_model2 = models.DCGAN_naive2(generator_model, discriminator2, noise_dim, img_source_dim)
-#    DCGAN_model2 = models.DCGAN_naive2(generator_model, classificator_model, noise_dim, img_source_dim)
+    DCGAN_model2 = models.DCGAN_naive2(generator_model, classificator_model, noise_dim, img_source_dim)
 #    zclass_model = z_coerence(generator_model,img_source_dim, bn_mode,wd,inject_noise,n_classes,noise_dim, model_name="zClass")
 #    GenToClassifier_model = models.GenToClassifierModel(generator_model, classificator_model, noise_dim, img_source_dim)
     #disc_penalty_model = models.disc_penalty(discriminator_model,noise_dim,img_source_dim,opt_D,model_name="disc_penalty_model")    
@@ -278,7 +277,7 @@ def train(**kwargs):
                     idx = np.argmax(class_p, axis=1)
                     virtual_labels = (idx[:, None]) == np.arange(n_classes) * 1
                     #code.interact(local=locals())
-                    gen2_loss = DCGAN_model2.train_on_batch([X_gen,X_source_batch2], virtual_labels ,sample_weight=np.ones(batch_size)*10)
+                    gen2_loss = DCGAN_model2.train_on_batch([X_gen,X_source_batch2], virtual_labels,sample_weight=np.ones(batch_size)*5)
                    
             list_gen_loss.appendleft(gen_loss)
             list_gen2_loss.appendleft(gen2_loss)

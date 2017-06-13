@@ -103,21 +103,16 @@ def build_opt(opt_D, opt_G, lr_D, lr_G):
     _opt_Z = data_utils.get_optimizer('Adam', lr_G)
     return _opt_D, _opt_G, _opt_C, _opt_Z
 
-def load_compile_reconstructions(generator_model1, generator_model2,noise_dim,img_source_dim1,img_source_dim2,opt_G):
-    rec1 = models.reconstructor(generator_model1, generator_model2, noise_dim, img_source_dim1)
-    rec2 = models.reconstructor(generator_model2, generator_model1, noise_dim, img_source_dim2)
-    rec1.compile(loss='mse',  optimizer=opt_G)
-    rec2.compile(loss='mse',  optimizer=opt_G)
-    return rec1,rec2
 
-def load_compile_models(noise_dim, img_source_dim, img_dest_dim, deterministic, pureGAN, wd, loss1, loss2, disc_type, n_classes, opt_D, opt_G, opt_C, opt_Z,suffix=None):
+def load_compile_models(noise_dim, img_source_dim, img_dest_dim, deterministic, pureGAN, wd, loss1, loss2, disc_type, n_classes, opt_D, opt_G, opt_C, opt_Z):
     # LOAD MODELS:
     generator_model = models.generator_google_mnistM(
-        noise_dim, img_source_dim, img_dest_dim, deterministic, pureGAN, wd,suffix)
+        noise_dim, img_source_dim, img_dest_dim, deterministic, pureGAN, wd)
     discriminator_model,discriminator2 = models.discriminator_dcgan_doubled(img_dest_dim, wd,n_classes,disc_type)
     classificator_model = models.classificator_google_mnistM(
         img_dest_dim, n_classes, wd)
-    DCGAN_model = models.DCGAN_naive(generator_model, discriminator_model, noise_dim, img_source_dim)
+    DCGAN_model = models.DCGAN_naive(
+        generator_model, discriminator_model, noise_dim, img_source_dim)
     if not deterministic:
         zclass_model = z_coerence(generator_model, img_source_dim, bn_mode=2, wd=wd,
                                   inject_noise=False, n_classes=n_classes, noise_dim=noise_dim, model_name="zClass")
@@ -172,8 +167,7 @@ def get_loss_list():
     list_gen_loss = deque(10 * [0], 10)
     list_zclass_loss = deque(10 * [0], 10)
     list_classifier_loss = deque(10 * [0], 10)
-    l_rec = deque(10 * [0], 10)
-    return list_disc_loss_real, list_disc_loss_gen, list_gen_loss, list_zclass_loss, list_classifier_loss, l_rec
+    return list_disc_loss_real, list_disc_loss_gen, list_gen_loss, list_zclass_loss, list_classifier_loss
 
 def get_batch(A_data, A_labels, B_data, B_labels, batch_size):
     A_data_batch, A_labels_batch, _ = next(data_utils.gen_batch(A_data, A_labels, batch_size))
@@ -283,15 +277,6 @@ def train_class(GAN, l_class,  A_data_batch, A_labels_batch):
     l_class.appendleft(class_loss[0])
     return l_class
 
-def train_rec(GAN,rec1, rec2, A_data_batch, B_data_batch, l_rec1, l_rec2):
-    X_noise = data_utils.sample_noise(GAN.noise_scale, GAN.batch_size, GAN.noise_dim)
-    X_noise2 = data_utils.sample_noise(GAN.noise_scale, GAN.batch_size, GAN.noise_dim)
-    rec_loss = rec1.train_on_batch([X_noise, A_data_batch,X_noise2],A_data_batch,sample_weight=np.ones(GAN.batch_size)*10)
-    rec_loss2 = rec2.train_on_batch([X_noise, B_data_batch,X_noise2],B_data_batch,sample_weight=np.ones(GAN.batch_size)*10)
-    l_rec1.appendleft(rec_loss)
-    l_rec2.appendleft(rec_loss2)
-    return l_rec1, l_rec2
-
 
 def train_gen_zclass(generator_model, DCGAN_model, zclass_model, disc_type, deterministic, noise_dim, noise_scale, batch_size, l_gen, l_zclass, X_source, Y_source, n_classes):
     X_gen = data_utils.sample_noise(noise_scale, batch_size, noise_dim)
@@ -319,7 +304,7 @@ def train_gen_zclass(generator_model, DCGAN_model, zclass_model, disc_type, dete
 
 
 def visualize_save_stuffs(GANs, progbar, gen_iterations, batch_counter, n_batch_per_epoch, l_disc_real1, l_disc_gen1, l_gen_loss1,
-                          l_class_loss1, l_disc_real2, l_disc_gen2, l_gen_loss2,l_class_loss2, A_data, A_labels, B_data, B_labels,start,e, l_rec1, l_rec2):
+                          l_class_loss1, l_disc_real2, l_disc_gen2, l_gen_loss2,l_class_loss2, A_data, A_labels, B_data, B_labels,start,e):
     gen_iterations += 1
     batch_counter += 1
     image_dim_ordering = 'th'
@@ -331,9 +316,7 @@ def visualize_save_stuffs(GANs, progbar, gen_iterations, batch_counter, n_batch_
                                             ("Loss_D_real2", np.mean(l_disc_real2)),
                                             ("Loss_D_gen2", np.mean(l_disc_gen2)),
                                             ("Loss_G2", np.mean(l_gen_loss2)),
-                                            ("Loss_Classifier2",np.mean(l_class_loss2)),
-                                            ("Loss_Rec1", np.mean(l_rec1)),
-                                            ("Loss_Rec2", np.mean(l_rec2))
+                                            ("Loss_Classifier2",np.mean(l_class_loss2))
                                        ])
 
     for GAN in GANs:
@@ -457,14 +440,12 @@ def train(**kwargs):
     A_data, A_labels, B_data, B_labels, n_classes, img_A_dim, img_B_dim = load_data(
         img_dim, image_dim_ordering, dset)
      
-    #### Setup GAN1
-    deterministic1 = True
+    # Setup GAN1
+    deterministic1 = False
     opt_D1, opt_G1, opt_C1, opt_Z1 = build_opt(opt_D, opt_G, lr_D, lr_G)
-    generator_model1, discriminator_model1,discriminator_class1, classificator_model1, DCGAN_model1, zclass_model1 = load_compile_models(noise_dim, img_A_dim, img_B_dim,
-                                                     deterministic1, pureGAN, wd, 'mse', 'categorical_crossentropy', disc_type, n_classes, opt_D1, opt_G1, opt_C1, opt_Z1, suffix=None)
+    generator_model1, discriminator_model1,discriminator_class1, classificator_model1, DCGAN_model1, zclass_model1 = load_compile_models(noise_dim, img_A_dim, img_B_dim, deterministic1, pureGAN, wd, 'mse', 'categorical_crossentropy', disc_type, n_classes, opt_D1, opt_G1, opt_C1, opt_Z1)
     load_pretrained_weights(generator_model1, discriminator_model1,discriminator_class1, DCGAN_model1, name1, B_data, B_labels, noise_scale, classificator_model1, resume=resume)
     img_buffer1, datagen1 = load_buffer_and_augmentation(history_size, batch_size, img_A_dim, n_classes)
-
     ##temporary settings:
     gen_entropy1=None
     GAN1=_GAN(generator_model1, discriminator_model1, discriminator_class1,DCGAN_model1,gen_entropy1,classificator_model1, batch_size, img_A_dim,img_B_dim, noise_dim, noise_scale,
@@ -472,24 +453,20 @@ def train(**kwargs):
     pretrain_disc( GAN1, A_data,A_labels, B_data, B_labels, pretrain_iters=500, resume=resume)
     #####################
 
-   ##### Setup GAN2
+   # Setup GAN2
     deterministic2 = True
     opt_D2, opt_G2, opt_C2, opt_Z2 = build_opt(opt_D, opt_G, lr_D, lr_G)
-    generator_model2, discriminator_model2, discriminator_class2, classificator_model2, DCGAN_model2, zclass_model2 = load_compile_models(noise_dim, img_B_dim, img_A_dim,
-                                                       deterministic2, pureGAN, wd, 'mse', 'categorical_crossentropy', disc_type, n_classes, opt_D2, opt_G2, opt_C2, opt_Z2, suffix=True)
+    generator_model2, discriminator_model2, discriminator_class2, classificator_model2, DCGAN_model2, zclass_model2 = load_compile_models(noise_dim, img_B_dim, img_A_dim, deterministic2, pureGAN, wd, 'mse', 'categorical_crossentropy', disc_type, n_classes, opt_D2, opt_G2, opt_C2, opt_Z2)
     load_pretrained_weights(generator_model2, discriminator_model2,discriminator_class2, DCGAN_model2, name2, B_data, B_labels, noise_scale, classificator_model2, resume=resume)
     img_buffer2, datagen2 = load_buffer_and_augmentation(history_size, batch_size, img_B_dim, n_classes)
 
+    ##temporary settings:
     gen_entropy2=None
     GAN2=_GAN(generator_model2, discriminator_model2, discriminator_class2, DCGAN_model2,gen_entropy2,classificator_model2, batch_size, img_B_dim,img_A_dim, noise_dim, noise_scale,
                lr_D, lr_G, deterministic2, inject_noise, model, lsmooth, img_buffer2, datagen2, disc_type, data_aug, n_classes, disc_iters, name2, dir='BtoA' )
     pretrain_disc( GAN2, A_data,A_labels, B_data, B_labels, pretrain_iters=500, resume=resume)
 
-    rec1, rec2 = load_compile_reconstructions(generator_model1, generator_model2,noise_dim,img_A_dim,img_B_dim,opt_G1)  
-#    if two_gans:
-#        GANs=[GAN1,GAN2]
-#    else:
-#        GANs=[GAN1]
+
     ################
     ##################
     for e in range(1, nb_epoch + 1):
@@ -498,20 +475,16 @@ def train(**kwargs):
         batch_counter = 1
         start = time.time()
         while batch_counter < n_batch_per_epoch:
-            l_disc_real1, l_disc_gen1, l_gen1, l_z1, l_class1,l_rec1 = get_loss_list()
+            l_disc_real1, l_disc_gen1, l_gen1, l_z1, l_class1 = get_loss_list()
             A_data_batch, A_labels_batch, B_data_batch, B_labels_batch = train_gan(GAN1, GAN1.disc_iters, A_data, A_labels, B_data, B_labels, batch_counter, l_disc_real1, l_disc_gen1, l_gen1)
-
-            l_disc_real2, l_disc_gen2, l_gen2, l_z2, l_class2, l_rec2 = get_loss_list()
-            A_data_batch, A_labels_batch, B_data_batch, B_labels_batch = train_gan(GAN2, GAN2.disc_iters, A_data, A_labels, B_data, B_labels, batch_counter, l_disc_real2, l_disc_gen2,l_gen2)
-
-            train_rec(GAN1, rec1, rec2, A_data_batch, B_data_batch,l_rec1, l_rec2) #BRINGING US TO L.A.? :)
             l_class1 = train_class(GAN1, l_class1,  A_data_batch, A_labels_batch)
+
+            l_disc_real2, l_disc_gen2, l_gen2, l_z2, l_class2 = get_loss_list()
+            A_data_batch, A_labels_batch, B_data_batch, B_labels_batch = train_gan(GAN2, GAN2.disc_iters, A_data, A_labels, B_data, B_labels, batch_counter, l_disc_real2, l_disc_gen2,l_gen2)
             l_class2 = train_class(GAN2, l_class2,  A_data_batch, A_labels_batch)
-
-
             batch_counter, gen_iterations = visualize_save_stuffs([GAN1,GAN2], progbar, gen_iterations, batch_counter, n_batch_per_epoch, 
                                                                               l_disc_real1, l_disc_gen1, l_gen1, l_class1, l_disc_real2, l_disc_gen2,
-                                                                              l_gen2, l_class2, A_data, A_labels, B_data, B_labels,start,e,l_rec1, l_rec2)
+                                                                              l_gen2, l_class2, A_data, A_labels, B_data, B_labels,start,e)
 
 #gen_iterations, batch_counter, idx, Yplot
 
